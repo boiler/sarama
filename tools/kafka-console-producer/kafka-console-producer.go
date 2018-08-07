@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -22,6 +24,10 @@ var (
 	verbose     = flag.Bool("verbose", false, "Turn on sarama logging to stderr")
 	showMetrics = flag.Bool("metrics", false, "Output metrics on successful publish to stderr")
 	silent      = flag.Bool("silent", false, "Turn off printing the message's topic, partition, and offset to stdout")
+	tlsCertFile = flag.String("tls-cert", "", "A PEM encoded certificate file")
+	tlsKeyFile  = flag.String("tls-key", "", "A PEM encoded private key file")
+	tlsCaFile   = flag.String("tls-ca", "", "A PEM encoded CA's certificate file")
+	tlsInsecure = flag.Bool("tls-insecure", false, "TLS accepts any certificate presented by the server and any host name in that certificate")
 
 	logger = log.New(os.Stderr, "", log.LstdFlags)
 )
@@ -63,6 +69,29 @@ func main() {
 		}
 	default:
 		printUsageErrorAndExit(fmt.Sprintf("Partitioner %s not supported.", *partitioner))
+	}
+
+	if *tlsCertFile != "" {
+		if *tlsKeyFile == "" {
+			printUsageErrorAndExit("-tls-key argument not specified")
+		}
+		cert, err := tls.LoadX509KeyPair(*tlsCertFile, *tlsKeyFile)
+		if err != nil {
+			printUsageErrorAndExit(err.Error())
+		}
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+		if *tlsCaFile != "" {
+			caCert, err := ioutil.ReadFile(*tlsCaFile)
+			if err != nil {
+				printUsageErrorAndExit(err.Error())
+			}
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(caCert)
+			tlsConfig.RootCAs = caCertPool
+			tlsConfig.InsecureSkipVerify = *tlsInsecure
+		}
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = tlsConfig
 	}
 
 	message := &sarama.ProducerMessage{Topic: *topic, Partition: int32(*partition)}
